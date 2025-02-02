@@ -59,6 +59,210 @@ let currentPieceX = 0;
 let currentPieceY = 0;
 let currentColor = "";
 
+class ComboSystem {
+  constructor() {
+    this.combo_count = 0;
+    this.combo_timer = 0;
+    this.combo_timeout = 2.0; // 콤보 유지 시간 (초)
+  }
+
+  add_combo() {
+    this.combo_count += 1;
+    this.combo_timer = this.combo_timeout;
+    this.show_combo_effect();
+  }
+
+  reset_combo() {
+    this.combo_count = 0;
+  }
+
+  update(dt) {
+    if (this.combo_timer > 0) {
+      this.combo_timer -= dt;
+      if (this.combo_timer <= 0) {
+        this.reset_combo();
+      }
+    }
+  }
+}
+
+class ComboEffect {
+  constructor() {
+    // 이펙트 이미지/스프라이트 로드
+    this.effects = {
+      small: load_image("small_effect.png"),
+      medium: load_image("medium_effect.png"),
+      large: load_image("large_effect.png"),
+    };
+    this.active_effects = [];
+  }
+
+  create_effect(combo_count, position) {
+    let effect_type = "small";
+    if (combo_count >= 3) {
+      effect_type = "medium";
+    }
+    if (combo_count >= 5) {
+      effect_type = "large";
+    }
+
+    const effect = {
+      sprite: this.effects[effect_type],
+      position: position,
+      lifetime: 1.0,
+      scale: 1.0,
+    };
+    this.active_effects.push(effect);
+  }
+
+  update(dt) {
+    // 활성화된 이펙트 업데이트 및 제거
+    this.active_effects.forEach((effect, index) => {
+      effect.lifetime -= dt;
+      if (effect.lifetime <= 0) {
+        this.active_effects.splice(index, 1);
+      }
+    });
+  }
+}
+
+class MobileControls {
+  constructor() {
+    this.buttons = {
+      left: { x: 50, y: window.innerHeight - 150, width: 80, height: 80 },
+      right: { x: 210, y: window.innerHeight - 150, width: 80, height: 80 },
+      down: { x: 130, y: window.innerHeight - 150, width: 80, height: 80 },
+      rotate: {
+        x: window.innerWidth - 100,
+        y: window.innerHeight - 150,
+        width: 80,
+        height: 80,
+      },
+    };
+    this.initTouchEvents();
+  }
+
+  drawControls(ctx) {
+    // 반투명한 컨트롤러 배경
+    ctx.globalAlpha = 0.5;
+    for (const [key, btn] of Object.entries(this.buttons)) {
+      ctx.fillStyle = "#333333";
+      ctx.beginPath();
+      ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 10);
+      ctx.fill();
+
+      // 버튼 아이콘 그리기
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = "24px Arial";
+      const text = {
+        left: "←",
+        right: "→",
+        down: "↓",
+        rotate: "R",
+      }[key];
+      ctx.fillText(text, btn.x + 30, btn.y + 45);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  initTouchEvents() {
+    canvas.addEventListener("touchstart", (e) => this.handleTouch(e));
+    canvas.addEventListener("touchend", (e) => this.handleTouchEnd(e));
+  }
+
+  handleTouch(event) {
+    event.preventDefault();
+    const touch = event.touches[0];
+    const touchX = touch.clientX;
+    const touchY = touch.clientY;
+
+    for (const [key, btn] of Object.entries(this.buttons)) {
+      if (
+        btn.x <= touchX &&
+        touchX <= btn.x + btn.width &&
+        btn.y <= touchY &&
+        touchY <= btn.y + btn.height
+      ) {
+        switch (key) {
+          case "left":
+            game.movePiece(-1);
+            break;
+          case "right":
+            game.movePiece(1);
+            break;
+          case "down":
+            game.dropPiece();
+            break;
+          case "rotate":
+            game.rotatePiece();
+            break;
+        }
+      }
+    }
+  }
+
+  handleTouchEnd(event) {
+    // 터치가 끝났을 때의 처리
+  }
+}
+
+class Particle {
+  constructor(x, y, color) {
+    this.x = x;
+    this.y = y;
+    this.color = color;
+    this.size = Math.random() * 4 + 2;
+    this.speedX = Math.random() * 6 - 3;
+    this.speedY = Math.random() * 6 - 3;
+    this.gravity = 0.1;
+    this.life = 1.0;
+    this.decay = Math.random() * 0.02 + 0.02;
+  }
+
+  update() {
+    this.speedY += this.gravity;
+    this.x += this.speedX;
+    this.y += this.speedY;
+    this.life -= this.decay;
+  }
+
+  draw(ctx) {
+    ctx.globalAlpha = this.life;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+  }
+}
+
+class ParticleSystem {
+  constructor() {
+    this.particles = [];
+    this.colors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF"];
+  }
+
+  createExplosion(x, y, count = 30) {
+    for (let i = 0; i < count; i++) {
+      const color = this.colors[Math.floor(Math.random() * this.colors.length)];
+      this.particles.push(new Particle(x, y, color));
+    }
+  }
+
+  update() {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      this.particles[i].update();
+      if (this.particles[i].life <= 0) {
+        this.particles.splice(i, 1);
+      }
+    }
+  }
+
+  draw(ctx) {
+    this.particles.forEach((particle) => particle.draw(ctx));
+  }
+}
+
 // 새로운 블록 생성
 function newPiece() {
   const shapeIndex = Math.floor(Math.random() * SHAPES.length);
@@ -161,6 +365,10 @@ function draw() {
         }
       }
     }
+  }
+
+  if (game.isMobile) {
+    game.mobileControls.drawControls(ctx);
   }
 }
 

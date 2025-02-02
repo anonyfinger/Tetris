@@ -1,0 +1,11 @@
+@media screen and (max-width: 768px) {
+  canvas {
+    width: 100%;
+    height: calc(100vh - 200px); /* 컨트롤러 공간 확보 */
+  }
+
+  #game-container {
+    padding: 10px;
+    margin: 0;
+  }
+}
