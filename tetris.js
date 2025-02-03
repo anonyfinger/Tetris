@@ -1,434 +1,312 @@
-const canvas = document.createElement("canvas");
-const ctx = canvas.getContext("2d");
-const scoreElement = document.getElementById("score");
-
-canvas.width = 300;
-canvas.height = 600;
-document.body.insertBefore(canvas, document.body.firstChild);
-
-const BLOCK_SIZE = 30;
-const COLS = 10;
-const ROWS = 20;
-let score = 0;
-
-// 테트리스 블록 모양
-const SHAPES = [
-  [[1, 1, 1, 1]], // I
-  [
-    [1, 1],
-    [1, 1],
-  ], // O
-  [
-    [1, 1, 1],
-    [0, 1, 0],
-  ], // T
-  [
-    [1, 1, 1],
-    [1, 0, 0],
-  ], // L
-  [
-    [1, 1, 1],
-    [0, 0, 1],
-  ], // J
-  [
-    [1, 1, 0],
-    [0, 1, 1],
-  ], // S
-  [
-    [0, 1, 1],
-    [1, 1, 0],
-  ], // Z
-];
-
-// 블록 색상
-const COLORS = [
-  "#00f0f0",
-  "#f0f000",
-  "#a000f0",
-  "#f0a000",
-  "#0000f0",
-  "#00f000",
-  "#f00000",
-];
-
-let board = Array(ROWS)
-  .fill()
-  .map(() => Array(COLS).fill(0));
-let currentPiece = null;
-let currentPieceX = 0;
-let currentPieceY = 0;
-let currentColor = "";
-
-class ComboSystem {
+class Tetris {
   constructor() {
-    this.combo_count = 0;
-    this.combo_timer = 0;
-    this.combo_timeout = 2.0; // 콤보 유지 시간 (초)
-  }
+    this.board = Array(20)
+      .fill()
+      .map(() => Array(10).fill(0));
+    this.score = 0;
+    this.level = 1;
+    this.gameBoard = document.querySelector(".game-board");
+    this.currentPiece = null;
+    this.gameOver = false;
 
-  add_combo() {
-    this.combo_count += 1;
-    this.combo_timer = this.combo_timeout;
-    this.show_combo_effect();
-  }
-
-  reset_combo() {
-    this.combo_count = 0;
-  }
-
-  update(dt) {
-    if (this.combo_timer > 0) {
-      this.combo_timer -= dt;
-      if (this.combo_timer <= 0) {
-        this.reset_combo();
-      }
-    }
-  }
-}
-
-class ComboEffect {
-  constructor() {
-    // 이펙트 이미지/스프라이트 로드
-    this.effects = {
-      small: load_image("small_effect.png"),
-      medium: load_image("medium_effect.png"),
-      large: load_image("large_effect.png"),
+    // 테트리스 블록 모양 정의
+    this.shapes = {
+      I: [[1, 1, 1, 1]],
+      L: [
+        [1, 0],
+        [1, 0],
+        [1, 1],
+      ],
+      J: [
+        [0, 1],
+        [0, 1],
+        [1, 1],
+      ],
+      O: [
+        [1, 1],
+        [1, 1],
+      ],
+      Z: [
+        [1, 1, 0],
+        [0, 1, 1],
+      ],
+      S: [
+        [0, 1, 1],
+        [1, 1, 0],
+      ],
+      T: [
+        [1, 1, 1],
+        [0, 1, 0],
+      ],
     };
-    this.active_effects = [];
-  }
 
-  create_effect(combo_count, position) {
-    let effect_type = "small";
-    if (combo_count >= 3) {
-      effect_type = "medium";
-    }
-    if (combo_count >= 5) {
-      effect_type = "large";
-    }
-
-    const effect = {
-      sprite: this.effects[effect_type],
-      position: position,
-      lifetime: 1.0,
-      scale: 1.0,
+    // 각 블록 타입별 색상 정의
+    this.colors = {
+      I: "#00f0f0", // 하늘색
+      O: "#f0f000", // 노란색
+      T: "#a000f0", // 보라색
+      S: "#00f000", // 초록색
+      Z: "#f00000", // 빨간색
+      J: "#0000f0", // 파란색
+      L: "#f0a000", // 주황색
     };
-    this.active_effects.push(effect);
+
+    this.currentType = null;
+
+    // 사운드 요소
+    this.sounds = {
+      move: document.getElementById("moveSound"),
+      rotate: document.getElementById("rotateSound"),
+      drop: document.getElementById("dropSound"),
+      clear: document.getElementById("clearSound"),
+      gameover: document.getElementById("gameoverSound"),
+    };
+
+    // 음소거 상태
+    this.isMuted = false;
+
+    this.init();
   }
 
-  update(dt) {
-    // 활성화된 이펙트 업데이트 및 제거
-    this.active_effects.forEach((effect, index) => {
-      effect.lifetime -= dt;
-      if (effect.lifetime <= 0) {
-        this.active_effects.splice(index, 1);
+  init() {
+    this.setupControls();
+    this.createNewPiece();
+    this.gameLoop();
+  }
+
+  setupControls() {
+    // 키보드 컨트롤
+    document.addEventListener("keydown", (e) => {
+      if (this.gameOver) return;
+
+      switch (e.key) {
+        case "ArrowLeft":
+          this.movePiece(-1, 0);
+          break;
+        case "ArrowRight":
+          this.movePiece(1, 0);
+          break;
+        case "ArrowDown":
+          this.movePiece(0, 1);
+          break;
+        case "ArrowUp":
+          this.rotatePiece();
+          break;
+        case " ": // 스페이스바
+          this.hardDrop();
+          break;
       }
     });
-  }
-}
 
-class MobileControls {
-  constructor() {
-    this.buttons = {
-      left: { x: 50, y: window.innerHeight - 150, width: 80, height: 80 },
-      right: { x: 210, y: window.innerHeight - 150, width: 80, height: 80 },
-      down: { x: 130, y: window.innerHeight - 150, width: 80, height: 80 },
-      rotate: {
-        x: window.innerWidth - 100,
-        y: window.innerHeight - 150,
-        width: 80,
-        height: 80,
-      },
+    // 모바일 컨트롤
+    document.getElementById("leftBtn").addEventListener("click", () => {
+      if (!this.gameOver) this.movePiece(-1, 0);
+    });
+
+    document.getElementById("rightBtn").addEventListener("click", () => {
+      if (!this.gameOver) this.movePiece(1, 0);
+    });
+
+    document.getElementById("downBtn").addEventListener("click", () => {
+      if (!this.gameOver) this.movePiece(0, 1);
+    });
+
+    document.getElementById("rotateBtn").addEventListener("click", () => {
+      if (!this.gameOver) this.rotatePiece();
+    });
+
+    document.getElementById("dropBtn").addEventListener("click", () => {
+      if (!this.gameOver) this.hardDrop();
+    });
+  }
+
+  createNewPiece() {
+    const shapes = Object.keys(this.shapes);
+    const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+    this.currentPiece = {
+      shape: this.shapes[randomShape],
+      x: 3,
+      y: 0,
     };
-    this.initTouchEvents();
+    this.currentType = randomShape;
   }
 
-  drawControls(ctx) {
-    // 반투명한 컨트롤러 배경
-    ctx.globalAlpha = 0.5;
-    for (const [key, btn] of Object.entries(this.buttons)) {
-      ctx.fillStyle = "#333333";
-      ctx.beginPath();
-      ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 10);
-      ctx.fill();
+  movePiece(dx, dy) {
+    const newX = this.currentPiece.x + dx;
+    const newY = this.currentPiece.y + dy;
 
-      // 버튼 아이콘 그리기
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "24px Arial";
-      const text = {
-        left: "←",
-        right: "→",
-        down: "↓",
-        rotate: "R",
-      }[key];
-      ctx.fillText(text, btn.x + 30, btn.y + 45);
+    if (this.isValidMove(newX, newY, this.currentPiece.shape)) {
+      this.currentPiece.x = newX;
+      this.currentPiece.y = newY;
+      this.draw();
+      if (dx !== 0) this.playSound("move"); // 좌우 이동 시 사운드
+      return true;
     }
-    ctx.globalAlpha = 1.0;
-  }
 
-  initTouchEvents() {
-    canvas.addEventListener("touchstart", (e) => this.handleTouch(e));
-    canvas.addEventListener("touchend", (e) => this.handleTouchEnd(e));
-  }
+    if (dy > 0) {
+      this.freezePiece();
+      this.clearLines();
+      this.createNewPiece();
+      this.playSound("drop"); // 블록이 바닥에 닿았을 때 사운드
 
-  handleTouch(event) {
-    event.preventDefault();
-    const touch = event.touches[0];
-    const touchX = touch.clientX;
-    const touchY = touch.clientY;
-
-    for (const [key, btn] of Object.entries(this.buttons)) {
       if (
-        btn.x <= touchX &&
-        touchX <= btn.x + btn.width &&
-        btn.y <= touchY &&
-        touchY <= btn.y + btn.height
+        !this.isValidMove(
+          this.currentPiece.x,
+          this.currentPiece.y,
+          this.currentPiece.shape
+        )
       ) {
-        switch (key) {
-          case "left":
-            game.movePiece(-1);
-            break;
-          case "right":
-            game.movePiece(1);
-            break;
-          case "down":
-            game.dropPiece();
-            break;
-          case "rotate":
-            game.rotatePiece();
-            break;
+        this.gameOver = true;
+        this.playSound("gameover"); // 게임 오버 시 사운드
+        alert("게임 오버!");
+      }
+    }
+    return false;
+  }
+
+  isValidMove(x, y, shape) {
+    for (let row = 0; row < shape.length; row++) {
+      for (let col = 0; col < shape[row].length; col++) {
+        if (shape[row][col]) {
+          const newX = x + col;
+          const newY = y + row;
+
+          if (newX < 0 || newX >= 10 || newY >= 20) return false;
+          if (newY >= 0 && this.board[newY][newX]) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  freezePiece() {
+    for (let row = 0; row < this.currentPiece.shape.length; row++) {
+      for (let col = 0; col < this.currentPiece.shape[row].length; col++) {
+        if (this.currentPiece.shape[row][col]) {
+          const boardY = this.currentPiece.y + row;
+          if (boardY >= 0) {
+            // 색상 정보를 보드에 저장
+            this.board[boardY][this.currentPiece.x + col] =
+              this.colors[this.currentType];
+          }
         }
       }
     }
   }
 
-  handleTouchEnd(event) {
-    // 터치가 끝났을 때의 처리
-  }
-}
-
-class Particle {
-  constructor(x, y, color) {
-    this.x = x;
-    this.y = y;
-    this.color = color;
-    this.size = Math.random() * 4 + 2;
-    this.speedX = Math.random() * 6 - 3;
-    this.speedY = Math.random() * 6 - 3;
-    this.gravity = 0.1;
-    this.life = 1.0;
-    this.decay = Math.random() * 0.02 + 0.02;
-  }
-
-  update() {
-    this.speedY += this.gravity;
-    this.x += this.speedX;
-    this.y += this.speedY;
-    this.life -= this.decay;
-  }
-
-  draw(ctx) {
-    ctx.globalAlpha = this.life;
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1.0;
-  }
-}
-
-class ParticleSystem {
-  constructor() {
-    this.particles = [];
-    this.colors = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF"];
-  }
-
-  createExplosion(x, y, count = 30) {
-    for (let i = 0; i < count; i++) {
-      const color = this.colors[Math.floor(Math.random() * this.colors.length)];
-      this.particles.push(new Particle(x, y, color));
-    }
-  }
-
-  update() {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      this.particles[i].update();
-      if (this.particles[i].life <= 0) {
-        this.particles.splice(i, 1);
+  clearLines() {
+    let linesCleared = 0;
+    for (let row = this.board.length - 1; row >= 0; row--) {
+      if (this.board[row].every((cell) => cell !== 0)) {
+        this.board.splice(row, 1);
+        this.board.unshift(Array(10).fill(0));
+        this.score += 100;
+        document.getElementById("score").textContent = this.score;
+        linesCleared++;
       }
     }
+    if (linesCleared > 0) {
+      this.playSound("clear"); // 라인 제거 시 사운드
+    }
   }
 
-  draw(ctx) {
-    this.particles.forEach((particle) => particle.draw(ctx));
+  rotatePiece() {
+    const rotated = this.currentPiece.shape[0].map((_, i) =>
+      this.currentPiece.shape.map((row) => row[i]).reverse()
+    );
+
+    if (this.isValidMove(this.currentPiece.x, this.currentPiece.y, rotated)) {
+      this.currentPiece.shape = rotated;
+      this.draw();
+      this.playSound("rotate"); // 회전 시 사운드
+    }
   }
-}
 
-// 새로운 블록 생성
-function newPiece() {
-  const shapeIndex = Math.floor(Math.random() * SHAPES.length);
-  currentPiece = SHAPES[shapeIndex];
-  currentColor = COLORS[shapeIndex];
-  currentPieceX = Math.floor(COLS / 2) - Math.floor(currentPiece[0].length / 2);
-  currentPieceY = 0;
+  // 가이드라인(고스트 피스) 위치 계산
+  getGhostPosition() {
+    let ghostY = this.currentPiece.y;
 
-  if (collision()) {
-    // 게임 오버
-    board = Array(ROWS)
-      .fill()
-      .map(() => Array(COLS).fill(0));
-    score = 0;
-    scoreElement.textContent = score;
+    // 블록이 더 이상 내려갈 수 없을 때까지 아래로 이동
+    while (
+      this.isValidMove(this.currentPiece.x, ghostY + 1, this.currentPiece.shape)
+    ) {
+      ghostY++;
+    }
+
+    return ghostY;
   }
-}
 
-// 충돌 검사
-function collision() {
-  for (let y = 0; y < currentPiece.length; y++) {
-    for (let x = 0; x < currentPiece[y].length; x++) {
-      if (currentPiece[y][x]) {
-        const boardX = currentPieceX + x;
-        const boardY = currentPieceY + y;
+  draw() {
+    this.gameBoard.innerHTML = "";
 
-        if (
-          boardX < 0 ||
-          boardX >= COLS ||
-          boardY >= ROWS ||
-          (boardY >= 0 && board[boardY][boardX])
-        ) {
-          return true;
+    // 보드에 있는 블록 그리기
+    for (let row = 0; row < this.board.length; row++) {
+      for (let col = 0; col < this.board[row].length; col++) {
+        const cell = document.createElement("div");
+        if (this.board[row][col]) {
+          cell.style.backgroundColor = this.board[row][col];
+        } else {
+          cell.style.backgroundColor = "#111";
         }
+        cell.style.border = "1px solid #222";
+        this.gameBoard.appendChild(cell);
       }
     }
-  }
-  return false;
-}
 
-// 블록 고정
-function freeze() {
-  for (let y = 0; y < currentPiece.length; y++) {
-    for (let x = 0; x < currentPiece[y].length; x++) {
-      if (currentPiece[y][x]) {
-        board[currentPieceY + y][currentPieceX + x] = currentColor;
-      }
-    }
-  }
-  // 줄 제거 확인
-  checkLines();
-  // 새로운 블록 생성
-  newPiece();
-}
-
-// 줄이 가득 찼는지 확인하고 제거
-function checkLines() {
-  for (let y = ROWS - 1; y >= 0; y--) {
-    if (board[y].every((cell) => cell !== 0)) {
-      // 줄 제거
-      board.splice(y, 1);
-      board.unshift(Array(COLS).fill(0));
-      score += 100;
-      scoreElement.textContent = score;
-    }
-  }
-}
-
-// 게임 보드 그리기
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // 보드 그리기
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      if (board[y][x]) {
-        ctx.fillStyle = board[y][x];
-        ctx.fillRect(
-          x * BLOCK_SIZE,
-          y * BLOCK_SIZE,
-          BLOCK_SIZE - 1,
-          BLOCK_SIZE - 1
-        );
-      }
-    }
-  }
-
-  // 현재 블록 그리기
-  if (currentPiece) {
-    ctx.fillStyle = currentColor;
-    for (let y = 0; y < currentPiece.length; y++) {
-      for (let x = 0; x < currentPiece[y].length; x++) {
-        if (currentPiece[y][x]) {
-          ctx.fillRect(
-            (currentPieceX + x) * BLOCK_SIZE,
-            (currentPieceY + y) * BLOCK_SIZE,
-            BLOCK_SIZE - 1,
-            BLOCK_SIZE - 1
-          );
+    // 현재 움직이는 블록 그리기
+    if (this.currentPiece) {
+      for (let row = 0; row < this.currentPiece.shape.length; row++) {
+        for (let col = 0; col < this.currentPiece.shape[row].length; col++) {
+          if (this.currentPiece.shape[row][col]) {
+            const y = this.currentPiece.y + row;
+            const x = this.currentPiece.x + col;
+            if (y >= 0) {
+              const index = y * 10 + x;
+              const cell = this.gameBoard.children[index];
+              if (cell) {
+                cell.style.backgroundColor = this.colors[this.currentType];
+              }
+            }
+          }
         }
       }
     }
   }
 
-  if (game.isMobile) {
-    game.mobileControls.drawControls(ctx);
-  }
-}
-
-// 키보드 컨트롤
-document.addEventListener("keydown", (e) => {
-  switch (e.key) {
-    case "ArrowLeft":
-      currentPieceX--;
-      if (collision()) currentPieceX++;
-      break;
-    case "ArrowRight":
-      currentPieceX++;
-      if (collision()) currentPieceX--;
-      break;
-    case "ArrowDown":
-      currentPieceY++;
-      if (collision()) {
-        currentPieceY--;
-        freeze();
+  gameLoop() {
+    const loop = () => {
+      if (!this.gameOver) {
+        this.movePiece(0, 1);
+        this.draw();
+        setTimeout(loop, 1000 - (this.level - 1) * 100);
       }
-      break;
-    case "ArrowUp":
-      rotate();
-      break;
-    case " ": // 스페이스바
-      // 충돌할 때까지 블록을 아래로 이동
-      while (!collision()) {
-        currentPieceY++;
-      }
-      currentPieceY--;
-      freeze();
-      break;
+    };
+    loop();
   }
-  draw();
-});
 
-// 블록 회전
-function rotate() {
-  const newPiece = currentPiece[0].map((_, i) =>
-    currentPiece.map((row) => row[i]).reverse()
-  );
-  const oldPiece = currentPiece;
-  currentPiece = newPiece;
-
-  if (collision()) {
-    currentPiece = oldPiece;
+  // 즉시 하강 기능 추가
+  hardDrop() {
+    let dropped = false;
+    while (this.movePiece(0, 1)) {
+      dropped = true;
+    }
+    if (dropped) {
+      this.playSound("drop"); // 하드 드롭 시 사운드
+    }
   }
-}
 
-// 게임 루프
-function gameLoop() {
-  currentPieceY++;
-  if (collision()) {
-    currentPieceY--;
-    freeze();
+  // 사운드 재생 함수
+  playSound(soundName) {
+    if (!this.isMuted && this.sounds[soundName]) {
+      this.sounds[soundName].currentTime = 0;
+      this.sounds[soundName]
+        .play()
+        .catch((e) => console.log("sound play error:", e));
+    }
   }
-  draw();
-  setTimeout(gameLoop, 1000);
 }
 
 // 게임 시작
-newPiece();
-gameLoop();
+window.onload = () => {
+  new Tetris();
+};
